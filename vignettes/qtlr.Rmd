@@ -1,0 +1,456 @@
+---
+title: "An introduction to the qtlr package"
+author: "John Kirkpatrick"
+date: "Last run on `r Sys.Date()` by `r Sys.info()[['user']]` on `r Sys.info()['nodename']`"
+output: rmarkdown::html_vignette
+bibliography: "qtlr-bibliography.bib"
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  error=TRUE
+)
+
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(qtlr)
+library(stringr)
+library(tibble)
+library(tidyr)
+```
+
+# Introduction
+ICH E6(R2) [@ICHE6R2] imposes on sponsors of clinical trials an obligation to use risk based monitoring (RBM) as part of their processes to ensure the quality and integrity of clinical trials data:
+
+> The sponsor should implement a system to manage quality throughout all stages of the trial process. ... The quality management system should use a risk-based approach.
+
+Further this RBM system should use quality tolerance limits (QTLs) to provide objective measures of a tool in assessing the overall quality of individual clinical trials and of overall development programmes:
+
+> Predefined quality tolerance limits should be established, taking into consideration the medical and statistical characteristics of the variables as well as the statistical design of the trial, to identify systematic issues that can impact subject safety or reliability of trial results. Detection of deviations from the predefined quality tolerance limits should trigger an evaluation to determine if action is needed.
+
+This vignette describes one possible implementation of QTLs.  The choice of metrics on which the QTLs are based is out-of-scope for this vignette.
+
+# Installing and using the qtlr package
+Use of the package is straightforward.  Before using it for the first time, it must be installed:
+
+`install.packages("qtlr")`
+
+Then, to use `qtlr` in an R script, it must be loaded and attached:
+
+`library(qtlr)`
+
+Internally, `qtlr` uses JAGS [@JAGS] to fit models and the `runjags` package [@RUNJAGS] to provide the interface between R and JAGS.  Therefore, you must ensure that JAGS is installed on your system before using `qtlr`.  Installing `qtlr` will also install `runjags` and other required packages if necessary.
+
+# First example
+As an introductory example, and to provide initial validation of the implementation, we reproduce the meta-analysis of clinical trial results presented in Example 2.7 of Berry et al [@BERRY2010].  Rather than being response rates reported in a number of clinical trials, we interpret their data as providing the number of participants at each site in a single  multicentre study, together with the number of participants who met some arbitrary metric (for example, reporting at least one cardiac adverse event of CTCAE grade 2 or higher, having at least one out-of-window study visit or being the subject of at least one data clarification caused by apparently missing CRF items).
+
+## The raw data
+The raw data in Berry et al's example is provided by the utility function `createBerryData`:
+```{r berryRawData}
+b <- createBerryData()
+b %>% kable(digits=c(0,0,0,3))
+```
+
+## Estimating the QTLs
+The default `qtlr` model for binomial data, which is a simple hierarchical Bayesian model and which corresponds to the model used by Berry et al, can be fitted simply by calling the `fitBinomialQtlModel` function and specifying `Subjects` and `Events` as the number of observations and number of events, respectively.
+```{r ex1Fit}
+m <- fitBinomialModel(b$Subjects, b$Events)
+```
+
+By default, `fitBinomialQtlModel` returns a tibble containing the concatenated posterior samples obtained from JAGS in tidy form.
+```{r ex1results1}
+m
+```
+
+`Parameter` indicates the parameter being sampled.  In this case `a` and `b` are the hyperparameters used to define the prior distributions of the `p`s and `p` is the sampled probability that a participant at the centre given by the value of `Index` reports an event.  Note that `Index` refers to the row of the input vectors `n` and `r`, not to any id variable that may exist in the input dataset.  The input vectors `n` and `r` are augmented with a pseudo observation which allows prediction of the probability that a participant at an arbitrary centre will report an event.  The MCMC samples can easily be summarised to obtain the fitted event probabilities.
+
+```{r ex1results2}
+results <-  m %>% 
+              filter(Parameter == "p") %>% 
+              group_by(Parameter, Index) %>% 
+              summarise(Fitted=mean(Value)) %>% 
+              ungroup()
+results %>% 
+   kable(digits=c(NA, 0, 2))
+```
+
+The results of this analysis can be combined with the original input data to reproduce the information in table 2.2 on page 63 of Berry et al.
+
+```{r ex1results3}
+berry <- results %>% 
+           mutate(Study=1:10) %>% 
+           left_join(b, by="Study") %>% 
+           select(Index, Subjects, Events, ObservedResponse, Fitted, -Parameter, -Study)
+berry %>% kable(col.names=c("Centre", "Subjects", "Events", "Observed", "Fitted"),
+                digits=c(0, 0, 0, 2, 2))
+```
+
+## Presenting the results to end-users
+The `qtlToQuantile` function allows the simple conversion of QTLs based on the quantiles of the fitted model to those based on quantiles of the underlying metric.  For example, the following snippet determines the event rates correspnding to the 10th, 20th, 80th and 90th quantiles of the fitted model.
+```{r ex1Limits1}
+postEx1 <- m %>% filter(Index == 10)
+limits <- qtlToQuantile(postEx1, c(0.1, 0.2, 0.8, 0.9))
+limits %>%  kable(digits=3)
+```
+
+Taking the 10th and 90th quantiles to define (lower and upper) investigation limits and the 20th and 80th quantiles to define (lower and upper) warning limits, we can categorise each site in the study...
+
+```{r ex1Banding1}
+berry <- berry %>% 
+           mutate(Band=cut(Fitted, 
+                           breaks=c(-Inf, limits$Quantile, Inf), 
+                           labels=c("Investigation low", "Warn low", "OK", "Warn high", "Investigation high")))
+berry %>% 
+  kable(col.names=c("Centre", "Subjects", "Events", "Observed", "Fitted", "QTL band"),
+        digits=c(0, 0, 0, 2, 2))
+
+```
+
+... or present only those sites which fall outside a QTL:
+
+```{r ex1Banding2}
+berry %>% 
+  filter(Band != "OK") %>% 
+  kable(col.names=c("Centre", "Subjects", "Events", "Observed", "Fitted", "QTL band"),
+        digits=c(0, 0, 0, 2, 2))
+```
+
+As we have discussed elsewhere [**** refs required ****], the fact that a site falls into an investigation band does not mean that the site is "at fault".  It merely suggests that the site *may*, in some way, be different to the other sites.  Thus, whilst investigation is appropriate, there should be no pre-judgment about the results of the investigation.  The investigation may reveal no discernable difference in study conduct between this site and others in the study.  In this case, the conclusion of the investigation may be that no action is required.  If a difference in study conduct is observed, then the appropriate action would depend both on the reason for the difference and the metric being considered.  
+
+The action may involve changes at the site in question or at other sites.  For example, suppose the metric being considered in the incidence of injection site reactions (ISRs) and that one particular site falls into the "investigation low" category.  In other words, taking account of the inherent variability in ISR rates between sites, the rate observed at this site is sufficiently low to suggest that it is different to that observed at other sites.  Consider two scenarios.  In the first, suppose the site staff consider that, in this indication and using this mode of therapy, ISRs are simply "par for the course" and therefore not worth reporting.  Here, the appropriate remedial action might be to retrain the site staff to make them more aware of the necessity of comprehensive and unbiased reporting of all safety data related to the study treatments.
+
+Alternatively, suppose that the site's chief investigator acknowledges the importance of ISRs because of their potential impact, not only on safety, but also on the comfort and convenience of the participants in the study.  The CI reports that it is standard practice at his site to prophylactically apply "magic cream" to the site of any planned infusion about 15 minutes before the the start of  treatment.  The site has found this to be beneficial in the past and, since it is not explicitly contra-indicated by the study protocol, the site staff saw no reason to deviate from their usual standard of care.  In this case, the appropriate action might be to suggest prophylaxis with "magic cream" at all other sites involved in the study.
+
+### Graphical presentations
+
+Graphical prsentations have obvious advantages compared to tabulations.  We adapt figure 2.9 on page 62 of Berry et al [@BERRY2010].  The `createQtlPlot` function can be called to plot the posterior distribution of the probability of event overlaid with the observed site-specific rates and QTL bands.  The default plot is deliberately crude, but is easily customised, as demonstrated below.
+
+```{r ex1Plot1}
+createQtlPlot(mcmcData=postEx1,
+              groupData=berry %>% filter(Index < 10),
+              groupResponse=ObservedResponse,
+              groupSize=Subjects)
+```
+
+The vertical bars in the plot show the observed group-specific event rates and the size of each group: the rate is indicated by their positions on the x-axis and their heights are proportional to the number of observations in the group.  The curve shows the posterior distribution of the probability of an event for participants in an arbitrary new group.  The shading shows the locations of the QTL bands, which by default are defined by the 10th, 20th, 80th and 90th centiles of the posterior.
+
+The value returned by `createQtlPlot` is a `ggplot2` object so it is easy to customise and chain.  For example, the next code snippet changes the label and shading of the QTL bands.
+
+```{r ex1Plot2}
+qtlColours <- c("red", "yellow", "white", "yellow", "red")
+qtlLabels <-c("Investigate low", "Warn low", "", "Warn high", "Investigate high")
+qtlScale <- scale_fill_manual(name="QTL", labels=qtlLabels, values=qtlColours)
+createQtlPlot(groupData=b,
+              groupResponse=ObservedResponse,
+              groupSize=Subjects,
+              mcmcData=postEx1) +
+  qtlScale
+```
+
+Other aspects of the plot's appearance can be customised using standard `theme` elements or the `labs` function:
+
+```{r ex1Plot3}
+createQtlPlot(groupData=b,
+              groupResponse=ObservedResponse,
+              groupSize=Subjects,
+              mcmcData=postEx1) +
+  qtlScale +
+  labs(x="Observed response",
+       title="Example QTL plot",
+       subtitle="(Based on data from Berry et al)")
+```
+
+The number QTL bands and their boundaries can be modified or suppressed by using the `qtls` argument.
+
+```{r ex1Plot4}
+createQtlPlot(groupData=b,
+              groupResponse=ObservedResponse,
+              groupSize=Subjects,
+              mcmcData=postEx1,
+              qtls=c(0.05, 0.15))
+createQtlPlot(groupData=b,
+              groupResponse=ObservedResponse,
+              groupSize=Subjects,
+              mcmcData=postEx1,
+              qtls=NULL)
+```
+
+The groups can be categorised by using the `groupType` argument
+
+```{r ex1Plot5}
+b1 <- b %>% mutate(Region=as.factor(c(1, 1, 1, 2, 2, 2, 3, 3, 3)))
+regionScale <- scale_colour_manual(name="Region",  
+                                   values=1:3,
+                                   labels=c("US", "EMEA", "Other"))
+createQtlPlot(groupData=b1,
+              groupResponse=ObservedResponse,
+              groupSize=Subjects,
+              mcmcData=postEx1,
+              groupType=Region) + 
+  qtlScale +
+  regionScale
+```
+
+By default, the posterior density is scaled so that its height at the mode is twice that of the tallest group size bar.  To change this behaviour, use the `postScaleFactor` argument.  The posterior density is based on the *scaled* kernel density estimate produced by `ggplot2::geom_density`, which has a height of `1` at the mode.  To set the modal height of the density to an absolute value, use `postScaleFactor=<constant>`.  To set the modal height of the density to a multiple of the largest group size, use `postScaleFactor=<constant>*max(groupData$groupSize)`.  For example, to rescale the previous plot:
+
+```{r ex1RescalePlot}
+createQtlPlot(groupData=b1,
+              groupResponse=ObservedResponse,
+              groupSize=Subjects,
+              mcmcData=postEx1,
+              groupType=Region,
+              postScaleFactor=0.75*max(b1$Subjects)) + 
+  qtlScale +
+  regionScale
+```
+
+[TO DO]  Bubble plot description in here.
+
+# Other data types
+The discussion so far has related only to binomial data.  `qtlr` also supports
+
+* Rate or event count data
+* Time-to-event data
+* Continuous data
+
+One generic function facilitates the presentation of QTLs for the different date types: `fitModel(type)` is a wrapper function that calls the appropriate `fitXXXXModel` function and passes the necessary parameters to the type specific funtion using `...`. `createQtlPlot` and `createQtlBubblePlot` are inherently generic.   Naturally, the type-specific model-fitting functions can be called directly.
+
+## Binary data
+The following snippet reproduces the analysis of the Berry data, but uses subject- rather than study-level input data.
+```{r binaryData}
+berrySubjects <- createBerryData(TRUE)
+mBinary <- fitBinaryModel(berrySubjects$Event, berrySubjects$Study)
+results <-  mBinary %>% 
+              filter(Parameter == "p") %>% 
+              group_by(Parameter, Index) %>% 
+              summarise(Fitted=mean(Value)) %>% 
+              ungroup()
+results %>% 
+   kable(digits=c(NA, 0, 2))
+```
+
+## Poisson data: rates or event counts
+As an illustration of the QTL methodology applied to event counts, we analyse the number of soldiers in 14 Prussian cavalry Corps kicked to death by horses each year from 1875 to 1894 [@BORTKIEWICZ].  This dataset is included in the `qltr` package in the `cavalryDeaths` tibble.  We calculate the total number of deaths during the period for each Corps together with the number of years over which the data were collected before calling `fitPoissonModel`.
+
+When analysing event counts, `qtlr` fits a model to the total number of events observed in each group but predicts the expected number of events *per unit time*.  Therefore, it is appropriate to use the `DeathsPerYear` column when creating the QTL plot.
+
+```{r cavalryDeaths}
+cavalrySummary <- cavalryDeaths %>% 
+                    group_by(Corps) %>% 
+                    summarise(Deaths=sum(Deaths),
+                              Duration=n()) %>% 
+                    mutate(DeathsPerYear=Deaths/Duration) %>% 
+                    ungroup() 
+cavalrySummary %>% kable()
+
+postCavalry <- fitPoissonModel(cavalrySummary$Deaths, cavalrySummary$Duration)
+results <-  postCavalry %>% 
+              filter(Parameter == "mu") %>% 
+              group_by(Parameter, Index) %>% 
+              summarise(Fitted=mean(Value)) %>% 
+              ungroup()
+limits <- qtlToQuantile(postCavalry %>% filter(Index == 15), c(0.1, 0.2, 0.8, 0.9))
+
+cavalrySummary <- cavalrySummary %>% 
+                    add_column(Index=1:14) %>% 
+                    left_join(results, by="Index") %>% 
+                    select(Corps, Deaths, Duration, DeathsPerYear, Fitted) %>% 
+                    mutate(Band=cut(Fitted/Duration, 
+                                    breaks=c(-Inf, limits$Quantile, Inf), 
+                                    labels=c("Investigation low", "Warn low", 
+                                             "OK", "Warn high", 
+                                             "Investigation high")))
+
+cavalrySummary %>% kable(col.names=c("Corps", "Deaths", "Duration", "Deaths per year", "Fitted", "Band"),
+                         digits=c(NA, 0, 0, 2, 2, NA))
+
+limits %>%  kable(digits=3, caption="QTL limits for the cavalry data")
+
+createQtlPlot(mcmcData=postCavalry %>% filter(Index == 15, Value < 3), 
+              groupData=cavalrySummary, 
+              groupSize=Duration, 
+              groupResponse=DeathsPerYear) +
+  qtlScale +
+  labs(x="Deaths per year",
+       title="QTLs for Prusssian cavalry deaths")
+```
+
+## Time-to-event data
+
+We use the VA Lung dataset [@VALUNG] to illustrate the methodology, using `CellType` as the grouping variable.  Note that in this example the plot excludes approximately 10% of the MCMC samples to remove some outliers and improve the appearance of the graphic.
+
+```{r vaLung}
+vaLungSummary <- vaLung %>%
+                   group_by(CellType) %>% 
+                   summarise(N=n(),
+                             Deaths=sum(Status),
+                             Censored=N-sum(Status),
+                             SurvivalTime=sum(SurvivalTime),
+                             MeanSurvival=SurvivalTime/Deaths)
+
+results <- fitTteModel(time=vaLung$SurvivalTime,
+                       status=vaLung$Status,
+                       g=vaLung$CellType)
+
+quantile(results$Value, probs=c(0.90, 0.95, 0.975, 0.99))
+
+createQtlPlot(mcmcData=results %>% filter(Index == 5, Value < 400),
+              groupData=vaLungSummary,
+              groupResponse=MeanSurvival)
+```
+
+## Continuous data
+
+The operation of the model on Normal data is illustrated using an artificial dataset.
+
+```{r normalData}
+#Generate data
+nCentres <- 6
+minSize <- 8
+maxSize <- 25
+centreSizes <- ceiling(runif(nCentres, min=minSize, max=maxSize))
+
+group <- rep(1:nCentres, times=centreSizes)
+centreMeans <- rnorm(nCentres, mean=5, sd=1.5)
+
+data <- tibble(SubjectID=1:length(group), 
+               Group=group,
+               Mean=rep(centreMeans, times=centreSizes),
+               Y=rnorm(length(group), Mean, 3))
+
+groupSummary <- data %>% 
+                  group_by(Group) %>% 
+                  summarise(N=n(), 
+                            TrueMean=mean(Mean),
+                            ObservedMean=mean(Y))
+
+#Analyse
+results <- fitNormalModel(x=data$Y, g=data$Group)
+summary <- results %>% 
+             filter(Index > 0) %>% 
+             rename(Group=Index) %>% 
+             group_by(Group) %>% 
+             summarise(FittedMean=mean(Value)) %>% 
+             ungroup()
+
+#Report
+groupSummary %>%
+  full_join(summary, by="Group") %>% 
+  kable(digits=2,
+        col.names=c("Group", "Subjects", "True","Observed","Fitted"),
+        caption="Group 7 is the pseudo-group representing future data") %>% 
+  add_header_above(c(" "=2, "Mean"=3))
+
+createQtlPlot(mcmcData=results %>% filter(Index==7),
+              groupData=groupSummary,
+              groupResponse=ObservedMean,
+              groupSize=N)
+```
+
+The fitted means display the expected shrinkage towards the overall mean.
+
+# Digging deeper
+## Default model specifications
+The default `qtlr` models can be obtained from the utility function `getModelString`.  For example:
+```{r ex1ChangeModel1}
+s <- getModelString("binomial")
+s %>% str_split("\\n")
+```
+
+## Binomial data
+The JAGS model string shown above defines a standard hierarchical Bayes model for observation count `n` and event count `r`.  The probability of an event is given by `p` and the prior for `b` is a beta distribution with hyperparameters `a` and `b`.  The prior distribution of both `a` and `b` is a uniform distribution over the range `0` to `10`.
+
+## Binary data
+As a convenience, binomial data can be presented at the participant level - in other words as binary data.  The default model string for binary data differs only slightly from that for binary data.
+
+```{r binaryModelString}
+s <- getModelString("binary")
+s %>% str_split("\\n")
+```
+
+`fitBinaryModel` constructs its own group index based on the value of the `g` argument, by converting this vector to a factor and then creating an appropriate index.  There is no need to ensure that the user-supplied group id vector contains only integers in the range `1` to `ngroups`.  The hyperpriors for binary data are identical to the hyperpriors for binomial data.
+
+## Poisson data: rates or event counts
+The `qtlr` model for rate or event count data assumes that the mean numbers of events per unit time across centres are drawn from a common distribution.  This rate per unit time is then scaled by the exposure reported at each centre.  The definition of exposure is arbitrary.
+
+```{r poissonModelString}
+s <- getModelString("poisson")
+s %>% str_split("\\n")
+```
+
+The priors for the &lambda;~i~, the mean rates per unit time in each group, are Gamma(&alpha;, &beta;).  The hyperparameters &alpha; and &beta; are both assumed to have a Gamma(1, 1) prior.
+
+## Time-to-event data
+Analysis of time-to-event data is slightly different to the analysis of other data types in `qtlr`.  In order to obtain *group* level estimates from *subject* level input data, `fitTteModel` first calculates group-level mean times to event as 
+
+$\frac{\Sigma t _i}{n _i}$
+
+where the t~i~ are the times to event (whether censored or not) in the i^th^ group and the n~i~ are the number of events in the i^th^ group.  The log mean survival times are then modelled using independent N(0, 10^6^) priors  results are backtransformed to the natural scale before being returned from `fitTteModel()`.  This is equivalent to a Bayesian Cox proportional hazards model with group as the only predictor.  [Check this assertion.]
+
+The log mean survival times are assumed to be Normally distributed.  The prior means are drawn from a Normal distribution with mean zero and *precision* 1x10^-6^.  The common prior *precision* of the group means is taken from an inverse Gamma distribution with shape and scale both equal to 1x10^-6^.
+
+```{r tteModelString}
+s <- getModelString("tte")
+s %>% str_split("\\n")
+```
+
+By their very nature, time-to-event analyses may require both longer chains and larger observed datasets than other data types before stable results can be obtained.
+
+## Continuous data
+
+The continuous data model analyses results at the subject level.  Subjects are allocated to groups.  The i^th^ group is assumed to be drawn from a N(&mu;~i~, &sigma;^2^) distribution.  The prior for the {&mu;~i~} is N(0, 10^6^) and the prior for the common variance &sigma;^2^ is inverse Gamma(10^6^, 10^6^).
+
+```{r normalModelString}
+s <- getModelString("normal")
+s %>% str_split("\\n")
+```
+
+## Using custom models
+A custom model can be fitted by providing a non-`NULL` value for the `modelString` parameter in the call to `fitXXXXModel`.  For example, the following code snippet changes the hyperpriors for `a` and `b` in the binomial QTL model to the exponential distribution with mean `1` and left-truncates them at `1`:
+
+```{r ex1ChangeModel2}
+s <- getModelString("binomial")
+customModel <- s %>% stringr::str_replace_all("dunif\\(0, 10\\)", "dexp\\(1\\) T\\(1,\\)")
+customModel %>% stringr::str_split("\\n")
+m2 <- fitBinomialModel(b$Subjects, b$Events, modelString=customModel)
+```
+
+Of course, a custom model string could be built from scratch if so desired.
+
+## Model checking
+The tibble returned by default from `fitXXXXModel` is a convenient basis for the presentation results from a QTL analysis.  It is less convenient when checking the technical adequacy of the model itself.  In this case, the raw value returned from `run.jags()` would be more hepful so that it could, for example, be used directly with `coda` functions.  This can be achieved by setting the `raw` parameter to `TRUE`:
+
+```{r ex1RawJAGS}
+fitBinomialModel(b$Subjects, b$Events, raw=TRUE)
+```
+
+## Modifying the MCMC analysis
+By default, the MCMC analysis used to fit the QTL models uses two chains, each of length 10000 with a burn-in of 4000, an adaptation period of 1000 and no thinning.  These are the `runjags` defaults.  The `fitXXXXModel` functions use `...` to pass parameters to `run.jags`.  This provides an easy mechanism for adapting the underlying MCMC analysis.  
+
+```{r ModifyMCMC1, eval=FALSE}
+m <- fitBinomialModel(b$Subjects, b$Events,
+                      burnin=2000,
+                      sample=20000,
+                      thin=2)
+```
+
+Note, however, that the `inits` argument to the `fitXXXXModel` functions should be used to modify both the number of chains used and the initial values of the starting parameters.
+
+```{r ModifyMCMC2, eval=FALSE}
+inits1 <- list(a=4, b=2)
+inits2 <- list(a=1, b=1)
+inits3 <- list(a=2, b=10)
+m <- fitBinomialModel(b$Subjects, b$Events,
+                      inits=list(inits1, inits2, inits3))
+```
+
+# References
+
