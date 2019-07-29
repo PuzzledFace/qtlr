@@ -19,7 +19,6 @@ knitr::opts_chunk$set(
 
 library(dplyr)
 library(knitr)
-library(kableExtra)
 library(ggplot2)
 library(qtlr)
 library(stringr)
@@ -94,10 +93,10 @@ berry %>% kable(col.names=c("Centre", "Subjects", "Events", "Observed", "Fitted"
 ```
 
 ## Presenting the results to end-users
-The `qtlToQuantile` function allows the simple conversion of QTLs based on the quantiles of the fitted model to those based on quantiles of the underlying metric.  For example, the following snippet determines the event rates correspnding to the 10th, 20th, 80th and 90th quantiles of the fitted model.
+The `qtlFromQuantile` function allows the simple conversion of QTLs based on the quantiles of the fitted model to those based on quantiles of the underlying metric.  For example, the following snippet determines the event rates correspnding to the 10th, 20th, 80th and 90th quantiles of the fitted model.
 ```{r ex1Limits1}
 postEx1 <- m %>% filter(Index == 10)
-limits <- qtlToQuantile(postEx1, c(0.1, 0.2, 0.8, 0.9))
+limits <- qtlFromQuantile(postEx1, c(0.1, 0.2, 0.8, 0.9))
 limits %>%  kable(digits=3)
 ```
 
@@ -257,7 +256,7 @@ results <-  postCavalry %>%
               group_by(Parameter, Index) %>% 
               summarise(Fitted=mean(Value)) %>% 
               ungroup()
-limits <- qtlToQuantile(postCavalry %>% filter(Index == 15), c(0.1, 0.2, 0.8, 0.9))
+limits <- qtlFromQuantile(postCavalry %>% filter(Index == 15), c(0.1, 0.2, 0.8, 0.9))
 
 cavalrySummary <- cavalrySummary %>% 
                     add_column(Index=1:14) %>% 
@@ -369,7 +368,7 @@ s %>% str_split("\\n")
 The JAGS model string shown above defines a standard hierarchical Bayes model for observation count `n` and event count `r`.  The probability of an event is given by `p` and the prior for `b` is a beta distribution with hyperparameters `a` and `b`.  The prior distribution of both `a` and `b` is a uniform distribution over the range `0` to `10`.
 
 ## Binary data
-As a convenience, binomial data can be presented at the participant level - in other words as binary data.  The default model string for binary data differs only slightly from that for binary data.
+As a convenience, binomial data can be presented at the participant level - in other words as binary data.  The default model string for binary data differs only slightly from that for binomial data.
 
 ```{r binaryModelString}
 s <- getModelString("binary")

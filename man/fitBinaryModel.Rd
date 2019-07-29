@@ -76,5 +76,5 @@ m <- fitBinaryModel(b$Event, b$Study,
 }
 \seealso{
 \code{\link{fitBinomialModel}}, \code{\link{fitPoissonModel}},
-\code{\link{fitTteModel}}
+\code{\link{fitTteModel}}, \code{\link{fitNormalModel}}
 }

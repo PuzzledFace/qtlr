@@ -7,7 +7,8 @@
 createQtlPlot(mcmcData, mcmcVar = Value, groupData,
   groupResponse = ObservedResponse, groupSize = N, groupType = NULL,
   basicTheme = ggplot2::theme_light, qtls = c(0.1, 0.2, 0.8, 0.9),
-  postScaleFactor = NULL, mcmcAlpha = 0.2, nDensity = 512)
+  postScaleFactor = NULL, mcmcAlpha = 0.2, nDensity = 512,
+  xAxisRange = NULL)
 }
 \arguments{
 \item{mcmcData}{the tibble containing the posterior MCMC samples of the metric}
@@ -44,6 +45,9 @@ bar.  See Usage Notes below.}
 power of two.  Normally, this can be left unchanged, but occasionally a
 different value is needed to correct visual artefacts related to the shading
 of the plot}
+
+\item{xAxisRange}{the range of the x-axis, as defined by a call to 
+\code{coord_cartesian()}.  NULL uses the default axis range.}
 }
 \value{
 the QTL plot

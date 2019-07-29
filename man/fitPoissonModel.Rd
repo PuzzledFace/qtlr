@@ -64,5 +64,5 @@ actual arguments".
 
 \seealso{
 \code{\link{fitBinomialModel}}, \code{\link{fitBinaryModel}},
-\code{\link{fitTteModel}}
+\code{\link{fitTteModel}}, \code{\link{fitNormalModel}}
 }

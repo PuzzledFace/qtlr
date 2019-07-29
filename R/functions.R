@@ -44,7 +44,8 @@
 #' \code{\link{fitBinaryModel}}, \code{\link{fitTteModel}}
 #' @examples
 #' #Fit a Normal QTL model to artifical data
-#' centreSizes <- ceiling(runif(6, min=8, max=25))
+#' nCentres <- 6
+#' centreSizes <- ceiling(runif(nCentres, min=8, max=25))
 #' group <- rep(1:nCentres, times=centreSizes)
 #' centreMeans <- rnorm(nCentres, mean=5, sd=1.5)
 #' means <- rep(centreMeans, times=centreSizes)
@@ -413,17 +414,17 @@ fitPoissonModel <- function(e,
 #'@examples
 #'b <- createBerryData()
 #'m <- fitBinomialModel(b$Subjects, b$Events) %>% dplyr::filter(Index==10)
-#'qtlToQuantile(m, c(0.1, 0.2, 0.8, 0.9))
+#'qtlFromQuantile(m, c(0.1, 0.2, 0.8, 0.9))
 #'@export
-qtlToQuantile <- function(data, probs, type=4)
+qtlFromQuantile <- function(data, probs, type=4)
 {
   rv <- data %>% 
-          dplyr::summarise(Quantile=list(stats::quantile(Value, 
+          dplyr::summarise(QTL=list(stats::quantile(Value, 
                                          probs=probs,
                                          type=type))
                           ) %>% 
           tidyr::unnest() %>% 
-          tibble::add_column(Prob=probs, .before=1)
+          tibble::add_column(Quantile=probs, .before=1)
   return (rv)
 }
 
@@ -533,7 +534,7 @@ createQtlPlot <- function(mcmcData,
   if (!is.null(qtls) & length(qtls) > 0)
   {
     #Shading required
-    qtlTibble <- qtlToQuantile(mcmcData, qtls)
+    qtlTibble <- qtlFromQuantile(mcmcData, qtls)
     d <- ggplot2::ggplot_build(mcmcData %>% 
                     ggplot2::ggplot() +
                     ggplot2::geom_density(ggplot2::aes_q(qVar, y=~..scaled..*postScaleFactor), 
