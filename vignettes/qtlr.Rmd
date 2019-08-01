@@ -104,6 +104,7 @@ Taking the 10th and 90th quantiles to define (lower and upper) investigation lim
 
 ```{r ex1Banding1}
 berry <- berry %>% 
+           filter(Centre != 10) %>% #Categorisation of the pseudo-centre is not appropriate
            mutate(Band=cut(Fitted, 
                            breaks=c(-Inf, limits$Quantile, Inf), 
                            labels=c("Investigation low", "Warn low", "OK", "Warn high", "Investigation high")))
@@ -210,8 +211,6 @@ createQtlPlot(groupData=b1,
   qtlScale +
   regionScale
 ```
-
-[TO DO]  Bubble plot description in here.
 
 # Other data types
 The discussion so far has related only to binomial data.  `qtlr` also supports

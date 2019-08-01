@@ -541,7 +541,7 @@ createQtlPlot <- function(mcmcData,
                                           n=nDensity)
                       )$data[[1]]
     d <- d %>% dplyr::mutate(Area=cut(x, 
-                               breaks=c(-Inf, qtlTibble$Quantile, Inf),
+                               breaks=c(-Inf, qtlTibble$QTL, Inf),
                                labels=1:(nrow(qtlTibble)+1)))
     plot <- plot +
               ggplot2::geom_line(data=d, ggplot2::aes(x=x, y=y))
