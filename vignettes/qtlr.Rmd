@@ -38,15 +38,15 @@ Further this RBM system should use quality tolerance limits (QTLs) to provide ob
 This vignette describes one possible implementation of QTLs.  The choice of metrics on which the QTLs are based is out-of-scope for this vignette.
 
 # Installing and using the qtlr package
-Use of the package is straightforward.  Before using it for the first time, it must be installed:
+Use of the package is straightforward.  Before using it for the first time, it must be installed.  Currently, installation is from GitHub rather than CRAN:
 
-`install.packages("qtlr")`
+`devtools::install_github("PuzzledFace/qtlr")`
 
 Then, to use `qtlr` in an R script, it must be loaded and attached:
 
 `library(qtlr)`
 
-Internally, `qtlr` uses JAGS [@JAGS] to fit models and the `runjags` package [@RUNJAGS] to provide the interface between R and JAGS.  Therefore, you must ensure that JAGS is installed on your system before using `qtlr`.  Installing `qtlr` will also install `runjags` and other required packages if necessary.
+Internally, `qtlr` uses JAGS [@JAGS] to fit models and the `runjags` package [@RUNJAGS] to provide the interface between R and JAGS.  Therefore, you must ensure that [JAGS is available](http://mcmc-jags.sourceforge.net/) on your system before using `qtlr`.  Installing `qtlr` will also install `runjags` and other required packages if necessary.
 
 # First example
 As an introductory example, and to provide initial validation of the implementation, we reproduce the meta-analysis of clinical trial results presented in Example 2.7 of Berry et al [@BERRY2010].  Rather than being response rates reported in a number of clinical trials, we interpret their data as providing the number of participants at each site in a single  multicentre study, together with the number of participants who met some arbitrary metric (for example, reporting at least one cardiac adverse event of CTCAE grade 2 or higher, having at least one out-of-window study visit or being the subject of at least one data clarification caused by apparently missing CRF items).
@@ -104,7 +104,7 @@ Taking the 10th and 90th quantiles to define (lower and upper) investigation lim
 
 ```{r ex1Banding1}
 berry <- berry %>% 
-           filter(Centre != 10) %>% #Categorisation of the pseudo-centre is not appropriate
+           filter(Index != 10) %>% #Categorisation of the pseudo-centre is not appropriate
            mutate(Band=cut(Fitted, 
                            breaks=c(-Inf, limits$Quantile, Inf), 
                            labels=c("Investigation low", "Warn low", "OK", "Warn high", "Investigation high")))
@@ -123,7 +123,7 @@ berry %>%
         digits=c(0, 0, 0, 2, 2))
 ```
 
-As we have discussed elsewhere [**** refs required ****], the fact that a site falls into an investigation band does not mean that the site is "at fault".  It merely suggests that the site *may*, in some way, be different to the other sites.  Thus, whilst investigation is appropriate, there should be no pre-judgment about the results of the investigation.  The investigation may reveal no discernable difference in study conduct between this site and others in the study.  In this case, the conclusion of the investigation may be that no action is required.  If a difference in study conduct is observed, then the appropriate action would depend both on the reason for the difference and the metric being considered.  
+As we have discussed elsewhere [@Kirkpatrick2020], the fact that a site falls into an investigation band does not mean that the site is "at fault".  It merely suggests that the site *may*, in some way, be different to the other sites.  Thus, whilst investigation is appropriate, there should be no pre-judgment about the results of the investigation.  The investigation may reveal no discernable difference in study conduct between this site and others in the study.  In this case, the conclusion of the investigation may be that no action is required.  If a difference in study conduct is observed, then the appropriate action would depend both on the reason for the difference and the metric being considered.  
 
 The action may involve changes at the site in question or at other sites.  For example, suppose the metric being considered in the incidence of injection site reactions (ISRs) and that one particular site falls into the "investigation low" category.  In other words, taking account of the inherent variability in ISR rates between sites, the rate observed at this site is sufficiently low to suggest that it is different to that observed at other sites.  Consider two scenarios.  In the first, suppose the site staff consider that, in this indication and using this mode of therapy, ISRs are simply "par for the course" and therefore not worth reporting.  Here, the appropriate remedial action might be to retrain the site staff to make them more aware of the necessity of comprehensive and unbiased reporting of all safety data related to the study treatments.
 
